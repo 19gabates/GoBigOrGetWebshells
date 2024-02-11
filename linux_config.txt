@@ -1,6 +1,8 @@
 Directories:
-/tmp
+/tmp/home,/tmp
 Ports:
-8080
+8080,4444
 ServiceNames:
 bigweb2.service
+Rename Binary:
+BIGGERWEBSITES,HELP
