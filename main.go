@@ -128,59 +128,6 @@ func RenamingFunction(configs []Config) {
 	fmt.Println("Renaming complete.")
 }
 
-/* StartPrograms starts the programs based on the config file
-func StartPrograms(configs []Config, pidFile string) {
-	// Clear the pid file
-	os.WriteFile(pidFile, []byte{}, 0644)
-
-	for _, config := range configs {
-		command := exec.Command(config.Directory+"/"+config.Name, config.Port)
-
-		// Run the command as a background process
-		err := command.Start()
-		if err != nil {
-			fmt.Printf("Error starting program %s on port %s: %v\n", config.Name, config.Port, err)
-			continue
-		}
-
-		// Save the PID to the pid file
-		pid := fmt.Sprintf("%d", command.Process.Pid)
-		f, err := os.OpenFile(pidFile, os.O_APPEND|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Println("Error opening pid file:", err)
-			continue
-		}
-		defer f.Close()
-
-		if _, err = f.WriteString(pid + "\n"); err != nil {
-			fmt.Println("Error writing to pid file:", err)
-		}
-
-		fmt.Printf("Started program %s on port %s (PID: %s)\n", config.Name, config.Port, pid)
-	}
-
-	fmt.Println("Programs started.")
-} */
-
-/*
-func HideFunction(configs []Config, pidFile string) {
-	// Create a systemd service file
-	err := createSystemdService(configs)
-	if err != nil {
-		fmt.Println("Error creating systemd service file:", err)
-		return
-	}
-
-	// Hide process IDs using the specified Linux command
-	err = hidePIDs(pidFile)
-	if err != nil {
-		fmt.Println("Error hiding process IDs:", err)
-		return
-	}
-
-	fmt.Println("Hide function complete.")
-} */
-
 // createSystemdService creates a systemd service file based on the provided configurations
 func createSystemdService(configs []Config) error {
 	for _, config := range configs {
@@ -208,84 +155,73 @@ WantedBy=multi-user.target
 	return nil
 }
 
-func systemctlReload(configs []Config) {
-	cmd := exec.Command("bash -c systemctl daemon-reload")
-	cmd.Run()
-
-	for _, config := range configs {
-		cmd = exec.Command("bash -c systemctl enable", fmt.Sprintf("%s.service", config.ServiceName))
-		cmd.Run()
-
-		cmd = exec.Command("bash -c systemctl start", fmt.Sprintf("%s.service", config.ServiceName))
-		cmd.Run()
-	}
-}
-
-func hidePIDS(configs []Config, pidFile string) error {
-	cmd := exec.Command("rm", "pid.txt", "&&", "touch pid.txt", "||", "touch pid.txt")
-	err := cmd.Run()
-	if err != nil {
-		return err
-	}
-
-	for _, config := range configs {
-		cmd = exec.Command("systemctl", "status", fmt.Sprintf("%s.service", config.ServiceName), "|", "grep", "Main", "|", "awk", "'{print $3}'", ">>", "pid.txt")
-		err = cmd.Run()
+func ensureEmptyPIDFile(fileName string) {
+	// Check if the file exists
+	if _, err := os.Stat(fileName); os.IsNotExist(err) {
+		// File does not exist, create an empty file
+		file, err := os.Create(fileName)
 		if err != nil {
-			return err
+			fmt.Println("Error creating file:", err)
+			return
+		}
+		defer file.Close()
+		fmt.Printf("File %s created.\n", fileName)
+	} else {
+		// File exists, check if it's empty
+		file, err := os.OpenFile(fileName, os.O_RDWR, os.ModePerm)
+		if err != nil {
+			fmt.Println("Error opening file:", err)
+			return
+		}
+		defer file.Close()
+
+		// Check file size
+		fileInfo, err := file.Stat()
+		if err != nil {
+			fmt.Println("Error getting file info:", err)
+			return
+		}
+
+		if fileInfo.Size() > 0 {
+			// File is not empty, truncate its content
+			err := file.Truncate(0)
+			if err != nil {
+				fmt.Println("Error truncating file:", err)
+				return
+			}
+			fmt.Printf("File %s cleared.\n", fileName)
+		} else {
+			// File is empty, do nothing
+			fmt.Printf("File %s is empty, no action needed.\n", fileName)
 		}
 	}
-
-	pids, err := os.ReadFile(pidFile)
-	if err != nil {
-		return err
-	}
-
-	pidList := string(pids)
-	if pidList == "" {
-		fmt.Println("No PIDs found in the file.")
-		return nil
-	}
-
-	// Split the PID list into individual PIDs
-	pidArray := strings.Fields(pidList)
-
-	// Iterate through each PID and execute the Linux command
-	for _, pid := range pidArray {
-		cmd := exec.Command("sh", "-c", fmt.Sprintf(`mount -t tmpfs none /proc/%s`, pid))
-		cmd.Run()
-		fmt.Printf("Successfully hid process ID %s.\n", pid)
-	}
-
-	return err
 }
 
-/* hidePIDs hides process IDs using the specified Linux command
-func hidePIDs(pidFile string) error {
-	pids, err := os.ReadFile(pidFile)
+func reloadSystemd() error {
+	cmd := exec.Command("/usr/bin/systemctl", "daemon-reload")
+	err := cmd.Run()
 	if err != nil {
-		return err
+		return fmt.Errorf("error with reload: %v", err)
 	}
-
-	pidList := string(pids)
-	if pidList == "" {
-		fmt.Println("No PIDs found in the file.")
-		return nil
-	}
-
-	// Split the PID list into individual PIDs
-	pidArray := strings.Fields(pidList)
-
-	// Iterate through each PID and execute the Linux command
-	for _, pid := range pidArray {
-		cmd := exec.Command("sh", "-c", fmt.Sprintf(`mount -t tmpfs none /proc/%s`, pid))
-		cmd.Run()
-		fmt.Printf("Successfully hid process ID %s.\n", pid)
-	}
-
-	fmt.Println("Successfully hid all process IDs.")
 	return nil
-} */
+}
+
+func enableAndStartServices(configs []Config) error {
+	for _, config := range configs {
+		cmd := exec.Command("/usr/bin/systemctl", "enable", config.ServiceName+".service")
+		err := cmd.Run()
+		if err != nil {
+			return fmt.Errorf("error with enabling: %v", err)
+		}
+
+		cmd = exec.Command("/usr/bin/systemctl", "start", config.ServiceName+".service")
+		err = cmd.Run()
+		if err != nil {
+			return fmt.Errorf("error with starting: %v", err)
+		}
+	}
+	return nil
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -305,52 +241,112 @@ func main() {
 		DistributionFunction(configs)
 		RenamingFunction(configs)
 		createSystemdService(configs)
-		cmd := exec.Command("/usr/bin/systemctl", "daemon-reload")
-		err = cmd.Run()
-		if err != nil {
-			fmt.Println("Error with reload:", err)
-			os.Exit(1)
-		}
+		reloadSystemd()
+		enableAndStartServices(configs)
+		ensureEmptyPIDFile("pid.txt")
 
 		for _, config := range configs {
-			cmd = exec.Command("/usr/bin/systemctl", "enable", config.ServiceName+".service")
-			err = cmd.Run()
-			if err != nil {
-				fmt.Println("Error with enabling:", err)
-				os.Exit(1)
-			}
-
-			cmd := exec.Command("/usr/bin/systemctl", "start", config.ServiceName+".service")
-			err = cmd.Run()
-			if err != nil {
-				fmt.Println("Error with starting:", err)
-				os.Exit(1)
-			}
-		}
-
-		cmd = exec.Command("touch", "pid.txt")
-		cmd.Run()
-
-		for _, config := range configs {
-			cmd = exec.Command("bash", "-c", fmt.Sprintf("systemctl status %s.service | grep Main | awk '{print $3}' >> pid.txt", config.ServiceName))
+			cmd := exec.Command("bash", "-c", fmt.Sprintf("systemctl status %s.service | grep Main | awk '{print $3}' >> pid.txt", config.ServiceName))
 			cmd.Run()
 		}
 
-	case "-ld":
+		file, err := os.Open("pid.txt")
+		if err != nil {
+			fmt.Println("Error opening file:", err)
+			os.Exit(1)
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			pid := scanner.Text()
+
+			// Execute the command for each PID
+			cmd := exec.Command("sh", "-c", fmt.Sprintf(`mount -t tmpfs none /proc/%s`, pid))
+			err := cmd.Run()
+			if err != nil {
+				fmt.Printf("Error hiding PID %s: %v\n", pid, err)
+			} else {
+				fmt.Printf("Successfully hid PID %s\n", pid)
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			fmt.Println("Error reading file:", err)
+		}
+
+		fmt.Printf("\nGoBigOrGetWebsehlls has successfully run\n")
+	
+	case "-ldist":
 		configs, err := PrimeVariables("config.txt")
 		if err != nil {
 			fmt.Println("Error reading config file:", err)
 			os.Exit(1)
 		}
 		DistributionFunction(configs)
-
-	case "-ln":
+	
+	case "-lname":
 		configs, err := PrimeVariables("config.txt")
 		if err != nil {
 			fmt.Println("Error reading config file:", err)
 			os.Exit(1)
 		}
 		RenamingFunction(configs)
+
+	case "-lcreates":
+		configs, err := PrimeVariables("config.txt")
+		if err != nil {
+			fmt.Println("Error reading config file:", err)
+			os.Exit(1)
+		}
+		createSystemdService(configs)
+		reloadSystemd()
+
+	case "-lstart":
+		configs, err := PrimeVariables("config.txt")
+		if err != nil {
+			fmt.Println("Error reading config file:", err)
+			os.Exit(1)
+		}
+		reloadSystemd()
+		enableAndStartServices(configs)
+
+	case "-lhide":
+		configs, err := PrimeVariables("config.txt")
+		if err != nil {
+			fmt.Println("Error reading config file:", err)
+			os.Exit(1)
+		}
+		ensureEmptyPIDFile("pid.txt")
+		for _, config := range configs {
+			cmd := exec.Command("bash", "-c", fmt.Sprintf("systemctl status %s.service | grep Main | awk '{print $3}' >> pid.txt", config.ServiceName))
+			cmd.Run()
+		}
+
+		file, err := os.Open("pid.txt")
+		if err != nil {
+			fmt.Println("Error opening file:", err)
+			os.Exit(1)
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			pid := scanner.Text()
+
+			// Execute the command for each PID
+			cmd := exec.Command("sh", "-c", fmt.Sprintf(`mount -t tmpfs none /proc/%s`, pid))
+			err := cmd.Run()
+			if err != nil {
+				fmt.Printf("Error hiding PID %s: %v\n", pid, err)
+			} else {
+				fmt.Printf("Successfully hid PID %s\n", pid)
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			fmt.Println("Error reading file:", err)
+		}
 
 	default:
 		fmt.Println("Invalid option.")
@@ -360,10 +356,11 @@ func main() {
 
 func printUsageAndExit() {
 	fmt.Println("Usage:")
-	fmt.Println("  <program name> -all   : Run all functions in order")
-	fmt.Println("  <program name> -ld    : Run distribution function")
-	fmt.Println("  <program name> -ln    : Run renaming function")
-	fmt.Println("  <program name> -start : Start programs")
-	fmt.Println("  <program name> -lh    : Run hide function")
+	fmt.Println("      -all      : Run all functions in order")
+	fmt.Println("      -ldist    : Run distribution function")
+	fmt.Println("      -lname    : Run renaming function")
+	fmt.Println("      -lcreates : Run create systemd service and reload systemd")
+	fmt.Println("      -lstart   : Reload systemd and enable/start services")
+	fmt.Println("      -lhide    : Ensure empty PID file, update PID file, and hides PIDs")
 	os.Exit(1)
 }
