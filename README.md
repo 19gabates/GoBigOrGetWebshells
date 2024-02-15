@@ -35,7 +35,8 @@ In the Linux module of the Go program, the functionality is structured as follow
 
       The fourth function focuses on concealing the Process IDs (PIDs) of the websites. This deliberate obfuscation makes it more challenging for detection mechanisms to identify and track the running processes, thereby enhancing the overall stealth of the deployed websites.
 
-## Example of Config File: <Directory>,<Port>,<Filename>,<Service_Name>
+## Example of Config File:
+<Directory>,<Port>,<Filename>,<Service_Name>
 ```
 /tmp,8080,BigWeb,website
 /tmp/home,4444,WEB,Bigweb
